@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Grahak Dashboard</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; background: #f5f6f8; color: #1a1a1a; }
+  header { background: #1b3a2b; color: #fff; padding: 20px 32px; }
+  header h1 { margin: 0; font-size: 22px; }
+  header p { margin: 4px 0 0; opacity: 0.8; font-size: 13px; }
+  main { max-width: 1000px; margin: 24px auto; padding: 0 16px; display: grid; gap: 20px; grid-template-columns: 1fr 1fr; }
+  .card { background: #fff; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+  .card h2 { margin-top: 0; font-size: 16px; color: #1b3a2b; }
+  .full { grid-column: 1 / -1; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px; border-bottom: 1px solid #eee; }
+  th { color: #555; font-weight: 600; }
+  form { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; }
+  label { display: flex; flex-direction: column; font-size: 12px; color: #555; gap: 4px; }
+  input { padding: 8px; border: 1px solid #ccc; border-radius: 4px; width: 110px; }
+  button { padding: 9px 16px; background: #1b3a2b; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; }
+  button:hover { background: #26533d; }
+  .status { font-size: 12px; margin-top: 8px; }
+  .status.ok { color: #1b7a3a; }
+  .status.err { color: #c0392b; }
+  .badge { padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .badge.ASSIGNED { background: #dcf5e3; color: #1b7a3a; }
+  .badge.FAILED { background: #fbe1e1; color: #c0392b; }
+  a.swagger-link { font-size: 13px; color: #1b3a2b; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Grahak</h1>
+  <p>Hyperlocal vendor routing dashboard — <a class="swagger-link" href="/swagger-ui.html">View API docs (Swagger)</a></p>
+</header>
+
+<main>
+
+  <div class="card full">
+    <h2>Vendors</h2>
+    <table id="vendorsTable">
+      <thead><tr><th>ID</th><th>Name</th><th>Address</th><th>Lat</th><th>Lng</th><th>Stock</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Find Nearby Vendors</h2>
+    <form id="nearbyForm">
+      <label>Latitude <input type="number" step="any" id="nLat" value="17.6599" required></label>
+      <label>Longitude <input type="number" step="any" id="nLng" value="75.9064" required></label>
+      <label>Radius (m) <input type="number" id="nRadius" value="3000" required></label>
+      <button type="submit">Search</button>
+    </form>
+    <div id="nearbyResult"></div>
+  </div>
+
+  <div class="card">
+    <h2>Place Order</h2>
+    <form id="orderForm">
+      <label>Latitude <input type="number" step="any" id="oLat" value="17.66" required></label>
+      <label>Longitude <input type="number" step="any" id="oLng" value="75.91" required></label>
+      <button type="submit">Place Order</button>
+    </form>
+    <div id="orderStatus" class="status"></div>
+  </div>
+
+  <div class="card full">
+    <h2>Orders</h2>
+    <table id="ordersTable">
+      <thead><tr><th>ID</th><th>Lat</th><th>Lng</th><th>Assigned Vendor</th><th>Status</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+</main>
+
+<script>
+const API = '/api';
+
+async function loadVendors() {
+  const res = await fetch(`${API}/vendors`);
+  const vendors = await res.json();
+  const tbody = document.querySelector('#vendorsTable tbody');
+  tbody.innerHTML = vendors.map(v => `
+    <tr><td>${v.id}</td><td>${v.name}</td><td>${v.address}</td><td>${v.latitude}</td><td>${v.longitude}</td><td>${v.stockCapacity}</td></tr>
+  `).join('');
+}
+
+async function loadOrders() {
+  const res = await fetch(`${API}/orders`);
+  const orders = await res.json();
+  const tbody = document.querySelector('#ordersTable tbody');
+  tbody.innerHTML = orders.map(o => `
+    <tr><td>${o.id}</td><td>${o.customerLat}</td><td>${o.customerLng}</td>
+    <td>${o.assignedVendorId ?? '—'}</td>
+    <td><span class="badge ${o.status}">${o.status}</span></td></tr>
+  `).join('');
+}
+
+document.getElementById('nearbyForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const lat = document.getElementById('nLat').value;
+  const lng = document.getElementById('nLng').value;
+  const radius = document.getElementById('nRadius').value;
+  const res = await fetch(`${API}/vendors/nearby?lat=${lat}&lng=${lng}&radiusMeters=${radius}`);
+  const vendors = await res.json();
+  document.getElementById('nearbyResult').innerHTML =
+    `<p class="status ok">${vendors.length} vendor(s) found: ${vendors.map(v => v.name).join(', ') || 'none'}</p>`;
+});
+
+document.getElementById('orderForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const lat = parseFloat(document.getElementById('oLat').value);
+  const lng = parseFloat(document.getElementById('oLng').value);
+  const statusEl = document.getElementById('orderStatus');
+  statusEl.textContent = 'Placing order...';
+  statusEl.className = 'status';
+  try {
+    const res = await fetch(`${API}/orders`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lat, lng })
+    });
+    if (!res.ok) throw new Error('Request failed');
+    const order = await res.json();
+    statusEl.textContent = `Order #${order.id} → ${order.status}${order.assignedVendorId ? ' (Vendor ' + order.assignedVendorId + ')' : ''}`;
+    statusEl.className = 'status ok';
+    loadOrders();
+  } catch (err) {
+    statusEl.textContent = 'Failed to place order.';
+    statusEl.className = 'status err';
+  }
+});
+
+loadVendors();
+loadOrders();
+</script>
+
+</body>
+</html>
